@@ -26,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bedrooms = intval($_POST['bedrooms'] ?? 0);
     $bathrooms = floatval($_POST['bathrooms'] ?? 0);
     $status = $_POST['status'] ?? '';
+    $map_link = trim($_POST['mapLink'] ?? '');
     
     // Validation
     $errors = [];
@@ -60,6 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (empty($status)) {
         $errors['status'] = 'Property status is required';
+    }
+    
+    // Validate Google Maps link (optional but if provided, should be valid)
+    if (!empty($map_link)) {
+        // Check if it's a valid Google Maps URL
+        if (!preg_match('/^https:\/\/(www\.)?(google\.(com|[a-z]{2,3}(\.[a-z]{2})?)|maps\.google\.(com|[a-z]{2,3}(\.[a-z]{2})?))\/(maps|url)/', $map_link)) {
+            $errors['mapLink'] = 'Please provide a valid Google Maps link';
+        }
     }
     
     // Handle image upload
@@ -97,8 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $stmt = $pdo->prepare("
                 INSERT INTO property 
-                (name, description, location, price, type, number_of_bedrooms, number_of_bathrooms, property_image, status, created_by) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (name, description, location, price, type, number_of_bedrooms, number_of_bathrooms, property_image, status, map, created_by) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             
             $stmt->execute([
@@ -111,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bathrooms,
                 $image_path,
                 $status,
+                $map_link,
                 $user_id
             ]);
             
@@ -253,6 +263,41 @@ if (isset($_SESSION['success_message'])) {
                     <?php endif; ?>
                 </div>
 
+                <!-- Google Maps Link -->
+                <div>
+                    <label for="mapLink" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Google Maps Link (Optional)
+                    </label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <svg class="w-5 h-5 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                        </div>
+                        <input 
+                            type="url" 
+                            id="mapLink" 
+                            name="mapLink" 
+                            value="<?php echo htmlspecialchars($_POST['mapLink'] ?? ''); ?>"
+                            class="w-full pl-12 pr-4 py-3 border <?php echo isset($errors['mapLink']) ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'; ?> rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+                            placeholder="https://maps.google.com/..."
+                        >
+                    </div>
+                    <?php if (isset($errors['mapLink'])): ?>
+                        <div class="text-red-500 text-sm mt-1"><?php echo htmlspecialchars($errors['mapLink']); ?></div>
+                    <?php endif; ?>
+                    <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        <p>To get a Google Maps link:</p>
+                        <ol class="list-decimal list-inside mt-1 space-y-1">
+                            <li>Go to <a href="https://maps.google.com" target="_blank" class="text-primary-600 dark:text-primary-400 hover:underline">Google Maps</a></li>
+                            <li>Search for the property address</li>
+                            <li>Click the "Share" button</li>
+                            <li>Copy the link and paste it here</li>
+                        </ol>
+                    </div>
+                </div>
+
                 <!-- Price and Property Type Row -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <!-- Price -->
@@ -305,7 +350,10 @@ if (isset($_SESSION['success_message'])) {
                             <div class="text-red-500 text-sm mt-1"><?php echo htmlspecialchars($errors['propertyType']); ?></div>
                         <?php endif; ?>
                     </div>
+                </div>
 
+                <!-- Status and Room Details Row -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <!-- Status -->
                     <div>
                         <label for="status" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -327,10 +375,7 @@ if (isset($_SESSION['success_message'])) {
                             <div class="text-red-500 text-sm mt-1"><?php echo htmlspecialchars($errors['status']); ?></div>
                         <?php endif; ?>
                     </div>
-                </div>
 
-                <!-- Property Status -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <!-- Bedrooms -->
                     <div>
                         <label for="bedrooms" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -445,6 +490,17 @@ if (isset($_SESSION['success_message'])) {
                 reader.readAsDataURL(file);
             } else {
                 imagePreview.classList.add('hidden');
+            }
+        });
+
+        // Map link validation
+        const mapLinkInput = document.getElementById('mapLink');
+        mapLinkInput.addEventListener('blur', function() {
+            const value = this.value.trim();
+            if (value && !value.match(/^https:\/\/(www\.)?(google\.(com|[a-z]{2,3}(\.[a-z]{2})?)|maps\.google\.(com|[a-z]{2,3}(\.[a-z]{2})?))\/(maps|url)/)) {
+                this.setCustomValidity('Please enter a valid Google Maps link');
+            } else {
+                this.setCustomValidity('');
             }
         });
     </script>

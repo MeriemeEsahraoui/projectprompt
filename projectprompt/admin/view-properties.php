@@ -28,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_property'])) {
     $bedrooms = intval($_POST['bedrooms'] ?? 0);
     $bathrooms = floatval($_POST['bathrooms'] ?? 0);
     $status = $_POST['status'] ?? '';
+    $map_link = trim($_POST['mapLink'] ?? '');
     
     // Validation
     $errors = [];
@@ -62,6 +63,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_property'])) {
     
     if (empty($status)) {
         $errors[] = 'Property status is required';
+    }
+    
+    // Validate Google Maps link (optional but if provided, should be valid)
+    if (!empty($map_link)) {
+        if (!preg_match('/^https:\/\/(www\.)?(google\.(com|[a-z]{2,3}(\.[a-z]{2})?)|maps\.google\.(com|[a-z]{2,3}(\.[a-z]{2})?))\/(maps|url)/', $map_link)) {
+            $errors[] = 'Please provide a valid Google Maps link';
+        }
     }
     
     if (empty($errors)) {
@@ -116,13 +124,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_property'])) {
             $stmt = $pdo->prepare("
                 UPDATE property 
                 SET name = ?, description = ?, location = ?, price = ?, type = ?, 
-                    number_of_bedrooms = ?, number_of_bathrooms = ?, status = ?, property_image = ?
+                    number_of_bedrooms = ?, number_of_bathrooms = ?, status = ?, property_image = ?, map = ?
                 WHERE Id = ? AND created_by = ?
             ");
             
             $result = $stmt->execute([
                 $name, $description, $location, $price, $type, 
-                $bedrooms, $bathrooms, $status_to_save, $image_path,
+                $bedrooms, $bathrooms, $status_to_save, $image_path, $map_link,
                 $property_id, $user_id
             ]);
             
@@ -482,6 +490,13 @@ if (isset($_GET['fix_status'])) {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                 </svg>
                                 <span class="truncate"><?php echo htmlspecialchars($property['location']); ?></span>
+                                <?php if (!empty($property['map'])): ?>
+                                    <a href="<?php echo htmlspecialchars($property['map']); ?>" target="_blank" class="ml-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                        </svg>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                             
                             <div class="flex items-center justify-between mb-4">
@@ -573,6 +588,31 @@ if (isset($_GET['fix_status'])) {
                             required
                             class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         >
+                    </div>
+
+                    <!-- Google Maps Link -->
+                    <div>
+                        <label for="editMapLink" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Google Maps Link (Optional)
+                        </label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <svg class="w-5 h-5 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
+                            </div>
+                            <input 
+                                type="url" 
+                                id="editMapLink" 
+                                name="mapLink" 
+                                class="w-full pl-12 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+                                placeholder="https://maps.google.com/..."
+                            >
+                        </div>
+                        <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            <p>Copy a Google Maps share link to enable map navigation for this property.</p>
+                        </div>
                     </div>
 
                     <!-- Price and Type -->
@@ -873,7 +913,18 @@ if (isset($_GET['fix_status'])) {
                         <div class="space-y-3">
                             <div>
                                 <span class="text-sm text-gray-600 dark:text-gray-400">Address:</span>
-                                <p class="text-gray-900 dark:text-white">${property.location || 'N/A'}</p>
+                                <div class="flex items-center justify-between">
+                                    <p class="text-gray-900 dark:text-white">${property.location || 'N/A'}</p>
+                                    ${property.map ? `
+                                        <a href="${property.map}" target="_blank" class="ml-2 inline-flex items-center px-3 py-1 text-sm bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/30 transition-colors">
+                                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                            </svg>
+                                            View on Maps
+                                        </a>
+                                    ` : ''}
+                                </div>
                             </div>
                             <div>
                                 <span class="text-sm text-gray-600 dark:text-gray-400">Description:</span>
@@ -930,6 +981,7 @@ if (isset($_GET['fix_status'])) {
             document.getElementById('editPropertyName').value = property.name || '';
             document.getElementById('editDescription').value = property.description || '';
             document.getElementById('editLocation').value = property.location || '';
+            document.getElementById('editMapLink').value = property.map || '';
             document.getElementById('editPrice').value = property.price || '';
             document.getElementById('editPropertyType').value = property.type || '';
             document.getElementById('editBedrooms').value = property.number_of_bedrooms || '';
@@ -1007,6 +1059,17 @@ if (isset($_GET['fix_status'])) {
                 reader.readAsDataURL(file);
             } else {
                 editImagePreview.classList.add('hidden');
+            }
+        });
+
+        // Map link validation for edit modal
+        const editMapLinkInput = document.getElementById('editMapLink');
+        editMapLinkInput.addEventListener('blur', function() {
+            const value = this.value.trim();
+            if (value && !value.match(/^https:\/\/(www\.)?(google\.(com|[a-z]{2,3}(\.[a-z]{2})?)|maps\.google\.(com|[a-z]{2,3}(\.[a-z]{2})?))\/(maps|url)/)) {
+                this.setCustomValidity('Please enter a valid Google Maps link');
+            } else {
+                this.setCustomValidity('');
             }
         });
 

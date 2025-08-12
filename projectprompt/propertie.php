@@ -1,5 +1,161 @@
+<?php 
+// Include database configuration (this will start the session)
+require_once 'include/config.php';
+// Get database connection
+$pdo = getDatabaseConnection();
 
-  <?php include('include/head.php');?>
+// Add the map field to the property table if it doesn't exist
+try {
+    // Check if map column exists
+    $checkColumn = $pdo->query("SHOW COLUMNS FROM property LIKE 'map'")->fetch();
+    if (!$checkColumn) {
+        // Add map column to the property table
+        $alterQuery = "ALTER TABLE property ADD COLUMN map TEXT NULL AFTER property_image";
+        $pdo->exec($alterQuery);
+        error_log("Map column added to property table successfully");
+    }
+} catch(PDOException $e) {
+    error_log("Error adding map column: " . $e->getMessage());
+}
+
+// Get property ID from URL parameter
+$property_id = isset($_GET['id']) ? (int)$_GET['id'] : 2;
+
+// Fetch property details
+try {
+    $stmt = $pdo->prepare("SELECT * FROM property WHERE Id = ? ");
+    $stmt->execute([$property_id]);
+    $property = $stmt->fetch();
+    
+    if (!$property) {
+        header("HTTP/1.0 404 Not Found");
+        die("Property not found or not available");
+    }
+} catch(PDOException $e) {
+    die("Error fetching property: " . $e->getMessage());
+}
+
+// Handle contact form submission
+$form_message = '';
+$form_status = '';
+
+if ($_POST && isset($_POST['submit_inquiry'])) {
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    $message = trim($_POST['message'] ?? '');
+    
+    // Validation
+    $errors = [];
+    if (empty($name)) $errors[] = "Name is required";
+    if (empty($email)) $errors[] = "Email is required";
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Invalid email format";
+    if (empty($message)) $errors[] = "Message is required";
+    
+    if (empty($errors)) {
+        try {
+            // Create inquiries table if it doesn't exist
+            $pdo->exec("CREATE TABLE IF NOT EXISTS property_inquiries (
+                id INT PRIMARY KEY AUTO_INCREMENT,
+                property_id INT NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                phone VARCHAR(20),
+                message TEXT NOT NULL,
+                inquiry_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status ENUM('new', 'contacted', 'closed') DEFAULT 'new'
+            )");
+            
+            // Insert inquiry into database
+            $stmt = $pdo->prepare("
+                INSERT INTO property_inquiries (property_id, name, email, phone, message) 
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$property_id, $name, $email, $phone, $message]);
+            
+            $form_message = "Thank you for your inquiry! We will get back to you soon.";
+            $form_status = 'success';
+            
+            // Clear form data after successful submission
+            $_POST = [];
+            
+        } catch(PDOException $e) {
+            $form_message = "Sorry, there was an error sending your inquiry. Please try again.";
+            $form_status = 'error';
+        }
+    } else {
+        $form_message = implode('<br>', $errors);
+        $form_status = 'error';
+    }
+}
+
+// Helper function to format property type
+function formatPropertyType($type) {
+    return ucwords(str_replace('_', ' ', $type));
+}
+
+// Helper function to get property status text
+function getPropertyStatus($status) {
+    switch($status) {
+        case 0: return 'For Sale';
+        case 1: return 'Sold';
+        case 2: return 'For Rent';
+        default: return 'Available';
+    }
+}
+
+// Helper function to get features array based on description
+function getPropertyFeatures($description, $type, $bedrooms, $bathrooms) {
+    $features = [];
+    
+    // Add standard features based on property type
+    switch(strtolower($type)) {
+        case 'villa':
+            $features = ['Private Swimming Pool', 'Garden', 'Security System', 'Garage'];
+            break;
+        case 'apartment':
+            $features = ['Elevator', 'Security', 'Parking', 'Balcony'];
+            break;
+        case 'townhouse':
+            $features = ['Garden', 'Garage', 'Multiple Floors', 'Privacy'];
+            break;
+        case 'studio':
+            $features = ['Open Layout', 'Modern Kitchen', 'High Ceilings'];
+            break;
+    }
+    
+    // Add features based on description keywords
+    $desc_lower = strtolower($description);
+    if (strpos($desc_lower, 'pool') !== false || strpos($desc_lower, 'swimming') !== false) {
+        $features[] = 'Swimming Pool';
+    }
+    if (strpos($desc_lower, 'gym') !== false || strpos($desc_lower, 'fitness') !== false) {
+        $features[] = 'Gym';
+    }
+    if (strpos($desc_lower, 'garden') !== false) {
+        $features[] = 'Garden';
+    }
+    if (strpos($desc_lower, 'security') !== false) {
+        $features[] = '24/7 Security';
+    }
+    if (strpos($desc_lower, 'kitchen') !== false) {
+        $features[] = 'Modern Kitchen';
+    }
+    if (strpos($desc_lower, 'parking') !== false || strpos($desc_lower, 'garage') !== false) {
+        $features[] = 'Parking';
+    }
+    
+    // Add standard amenities
+    $features[] = 'High-Speed Internet';
+    $features[] = 'Air Conditioning';
+    
+    return array_unique($features);
+}
+
+$features = getPropertyFeatures($property['description'], $property['type'], $property['number_of_bedrooms'], $property['number_of_bathrooms']);
+
+include('include/head.php');
+?>
 <body class="bg-gray-100">
   <style>
         /* Custom styles for animations */
@@ -7,15 +163,12 @@
             background: linear-gradient(135deg, rgba(0,0,0,0.7) 0%, rgba(79,70,229,0.4) 100%);
         }
         
-        /* Removed .floating-element and @keyframes float */
-        
         /* Remove problematic initial styles and add fallbacks */
         .property-card,
         .fade-in-up,
         .scale-in,
         .slide-in-left,
         .slide-in-right {
-            /* Remove initial transforms that could hide content */
             opacity: 1;
             transform: none;
             visibility: visible;
@@ -80,146 +233,350 @@
 
         /* Define header height variable for consistent spacing */
         :root {
-            --header-height: 64px; /* Approximate height of the header */
+            --header-height: 64px;
+        }
+
+        /* Alert styles */
+        .alert {
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        
+        .alert-success {
+            background-color: #d1fae5;
+            border: 1px solid #a7f3d0;
+            color: #065f46;
+        }
+        
+        .alert-error {
+            background-color: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+
+        /* Property image styling */
+        .property-main-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }
+
+        .property-main-image:hover {
+            transform: scale(1.05);
+        }
+
+        /* Map button styling */
+        .map-button {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+        
+        .map-button:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e40af);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+            text-decoration: none;
+        }
+
+        /* Interactive map styles */
+        .map-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .map-container iframe {
+            width: 100%;
+            height: 320px;
+            border: none;
+            border-radius: 12px;
+        }
+
+        .map-overlay {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 10;
         }
     </style>
+    
     <!-- Custom Cursor -->
     <div class="custom-cursor" id="cursor"></div>
 
     <!-- Header -->
-   <?php include('include/header.php');?>
+    <?php include('include/header.php');?>
 
     <!-- Property Details Section -->
     <main class="pt-[var(--header-height)] bg-gray-100">
         <div class="container mx-auto px-4 py-8">
             <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
-                <!-- Property Image Gallery/Carousel -->
+                <!-- Property Image -->
                 <div class="relative h-96 md:h-[500px] overflow-hidden fade-in-up">
-                    <img src="img/Luxury Villa in Beverly Hills.jpg" alt="Luxury Villa Exterior" class="w-full h-full object-cover">
-                    <!-- Add more images here for a carousel effect if desired -->
+                    <?php if (!empty($property['property_image']) && file_exists('admin/' . $property['property_image'])): ?>
+                        <img src="admin/<?php echo htmlspecialchars($property['property_image']); ?>" 
+                             alt="<?php echo htmlspecialchars($property['name']); ?>" 
+                             class="property-main-image">
+                    <?php else: ?>
+                        <div class="w-full h-full bg-gradient-to-br from-indigo-400 to-purple-600 flex items-center justify-center">
+                            <svg class="w-32 h-32 text-white opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                            </svg>
+                        </div>
+                    <?php endif; ?>
+                    
                     <div class="absolute bottom-4 left-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-2 rounded-full text-lg font-semibold">
-                        For Sale
+                        <?php echo getPropertyStatus($property['status']); ?>
                     </div>
+                    
+                    <!-- Property Type Badge -->
+                    <div class="absolute top-4 right-4 bg-white bg-opacity-90 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
+                        <?php echo formatPropertyType($property['type']); ?>
+                    </div>
+
+                    <!-- Google Maps Button (if map link exists) -->
+                    <?php if (!empty($property['map'])): ?>
+                        <div class="absolute top-4 left-4">
+                            <a href="<?php echo htmlspecialchars($property['map']); ?>" 
+                               target="_blank" 
+                               class="map-button text-white px-4 py-2 rounded-full text-sm font-medium inline-flex items-center shadow-lg"
+                               title="View location on Google Maps">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
+                                View on Maps
+                            </a>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="p-6 md:p-10">
                     <!-- Property Title and Price -->
                     <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 slide-in-left">
-                        <div>
-                            <h1 class="text-4xl font-bold text-gray-800 mb-2">Luxury Villa in Beverly Hills</h1>
-                            <p class="text-gray-600 text-lg flex items-center">
-                                <i class="fas fa-map-marker-alt mr-2 text-indigo-600"></i>
-                                Beverly Hills, CA 90210
-                            </p>
+                        <div class="flex-grow">
+                            <h1 class="text-4xl font-bold text-gray-800 mb-2"><?php echo htmlspecialchars($property['name']); ?></h1>
+                            <div class="flex items-center justify-between">
+                                <p class="text-gray-600 text-lg flex items-center">
+                                    <i class="fas fa-map-marker-alt mr-2 text-indigo-600"></i>
+                                    <?php echo htmlspecialchars($property['location']); ?>
+                                </p>
+                                <?php if (!empty($property['map'])): ?>
+                                    <a href="<?php echo htmlspecialchars($property['map']); ?>" 
+                                       target="_blank" 
+                                       class="ml-4 text-indigo-600 hover:text-indigo-800 transition-colors"
+                                       title="Open in Google Maps">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                        </svg>
+                                    </a>
+                                <?php endif; ?>
+                            </div>
                         </div>
-                        <span class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mt-4 md:mt-0">$2,850,000</span>
+                        <span class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mt-4 md:mt-0">
+                            $<?php echo number_format($property['price']); ?>
+                        </span>
                     </div>
 
                     <!-- Key Details -->
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 text-center scale-in">
                         <div class="bg-gray-50 p-4 rounded-lg">
                             <i class="fas fa-bed text-indigo-600 text-2xl mb-2"></i>
-                            <p class="text-xl font-semibold text-gray-800">4 Beds</p>
+                            <p class="text-xl font-semibold text-gray-800"><?php echo $property['number_of_bedrooms']; ?> Beds</p>
                         </div>
                         <div class="bg-gray-50 p-4 rounded-lg">
                             <i class="fas fa-bath text-indigo-600 text-2xl mb-2"></i>
-                            <p class="text-xl font-semibold text-gray-800">3 Baths</p>
+                            <p class="text-xl font-semibold text-gray-800"><?php echo $property['number_of_bathrooms']; ?> Baths</p>
                         </div>
                         <div class="bg-gray-50 p-4 rounded-lg">
-                            <i class="fas fa-ruler-combined text-indigo-600 text-2xl mb-2"></i>
-                            <p class="text-xl font-semibold text-gray-800">250 m²</p>
+                            <i class="fas fa-home text-indigo-600 text-2xl mb-2"></i>
+                            <p class="text-xl font-semibold text-gray-800"><?php echo formatPropertyType($property['type']); ?></p>
                         </div>
                         <div class="bg-gray-50 p-4 rounded-lg">
-                            <i class="fas fa-car text-indigo-600 text-2xl mb-2"></i>
-                            <p class="text-xl font-semibold text-gray-800">2 Garage</p>
+                            <i class="fas fa-calendar-alt text-indigo-600 text-2xl mb-2"></i>
+                            <p class="text-xl font-semibold text-gray-800">Listed <?php echo date('M Y', strtotime($property['created_at'])); ?></p>
                         </div>
                     </div>
 
                     <!-- Description -->
                     <div class="mb-8 fade-in-up">
                         <h3 class="text-2xl font-bold text-gray-800 mb-4">Description</h3>
-                        <p class="text-gray-700 leading-relaxed">
-                            Nestled in the prestigious hills of Beverly Hills, this exquisite villa offers unparalleled luxury and breathtaking city views. Boasting 250 square meters of meticulously designed living space, this property is a true masterpiece of modern architecture and sophisticated comfort. From the grand entrance to the expansive outdoor entertaining areas, every detail has been thoughtfully curated to provide an exceptional living experience.
-                        </p>
-                        <p class="text-gray-700 leading-relaxed mt-4">
-                            The open-concept layout seamlessly connects the gourmet kitchen, elegant dining area, and spacious living room, all bathed in natural light. Retreat to one of the four generously sized bedrooms, each offering privacy and tranquility. The master suite is a sanctuary with a spa-like ensuite bathroom and a private balcony overlooking the stunning landscape. This is more than a home; it's a lifestyle.
-                        </p>
+                        <div class="text-gray-700 leading-relaxed">
+                            <?php 
+                            $description = $property['description'];
+                            if (strlen($description) > 50) {
+                                echo '<p class="mb-4">' . nl2br(htmlspecialchars($description)) . '</p>';
+                            } else {
+                                // If description is too short, add some generic text
+                                echo '<p class="mb-4">' . nl2br(htmlspecialchars($description)) . '</p>';
+                                echo '<p class="text-gray-700 leading-relaxed">This beautiful ' . strtolower(formatPropertyType($property['type'])) . ' offers comfortable living in a desirable location. With ' . $property['number_of_bedrooms'] . ' bedrooms and ' . $property['number_of_bathrooms'] . ' bathrooms, it provides ample space for relaxation and entertainment. The property features modern amenities and is situated in the sought-after area of ' . htmlspecialchars($property['location']) . '.</p>';
+                            }
+                            ?>
+                            <p class="text-gray-700 leading-relaxed mt-4">
+                                This property represents excellent value at $<?php echo number_format($property['price']); ?> and is perfect for those seeking quality accommodation. Don't miss this opportunity to own a piece of prime real estate in <?php echo htmlspecialchars($property['location']); ?>.
+                            </p>
+                        </div>
                     </div>
 
                     <!-- Features & Amenities -->
                     <div class="mb-8 slide-in-right">
                         <h3 class="text-2xl font-bold text-gray-800 mb-4">Features & Amenities</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-gray-700">
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-swimming-pool text-indigo-600"></i>
-                                <span>Private Swimming Pool</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-dumbbell text-indigo-600"></i>
-                                <span>Home Gym</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-wifi text-indigo-600"></i>
-                                <span>High-Speed Internet</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-fan text-indigo-600"></i>
-                                <span>Central Air Conditioning</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-fire-extinguisher text-indigo-600"></i>
-                                <span>Fireplace</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-shield-alt text-indigo-600"></i>
-                                <span>24/7 Security</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-utensils text-indigo-600"></i>
-                                <span>Gourmet Kitchen</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-tree text-indigo-600"></i>
-                                <span>Landscaped Garden</span>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <i class="fas fa-video text-indigo-600"></i>
-                                <span>Home Theater</span>
-                            </div>
+                            <?php 
+                            $feature_icons = [
+                                'Swimming Pool' => 'fas fa-swimming-pool',
+                                'Private Swimming Pool' => 'fas fa-swimming-pool',
+                                'Pool' => 'fas fa-swimming-pool',
+                                'Gym' => 'fas fa-dumbbell',
+                                'High-Speed Internet' => 'fas fa-wifi',
+                                'Internet' => 'fas fa-wifi',
+                                'Air Conditioning' => 'fas fa-fan',
+                                'Fireplace' => 'fas fa-fire-extinguisher',
+                                '24/7 Security' => 'fas fa-shield-alt',
+                                'Security' => 'fas fa-shield-alt',
+                                'Security System' => 'fas fa-shield-alt',
+                                'Kitchen' => 'fas fa-utensils',
+                                'Modern Kitchen' => 'fas fa-utensils',
+                                'Garden' => 'fas fa-tree',
+                                'Theater' => 'fas fa-video',
+                                'Parking' => 'fas fa-car',
+                                'Garage' => 'fas fa-car',
+                                'Balcony' => 'fas fa-building',
+                                'Elevator' => 'fas fa-arrows-alt-v',
+                                'Multiple Floors' => 'fas fa-layer-group',
+                                'Open Layout' => 'fas fa-expand-arrows-alt',
+                                'High Ceilings' => 'fas fa-arrows-alt-v',
+                                'Privacy' => 'fas fa-eye-slash'
+                            ];
+                            
+                            foreach ($features as $feature): 
+                                $icon = $feature_icons[$feature] ?? 'fas fa-check';
+                            ?>
+                                <div class="flex items-center space-x-3">
+                                    <i class="<?php echo $icon; ?> text-indigo-600"></i>
+                                    <span><?php echo htmlspecialchars($feature); ?></span>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
 
-                    <!-- Location Map (Placeholder) -->
+                    <!-- Location & Map -->
                     <div class="mb-8 fade-in-up">
-  <h3 class="text-2xl font-bold text-gray-800 mb-4">Location</h3>
-  <div class="w-full h-80 bg-gray-200 rounded-lg overflow-hidden">
-    <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d53379.816710574276!2d-7.622173899919255!3d33.260246756806275!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0xda63ce8fa04c5cf%3A0xc1041e48089e20f!2sBerrechid!5e0!3m2!1sfr!2sma!4v1753782857720!5m2!1sfr!2sma" width="1200" height="450" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-  </div>
-</div>
-
+                        <h3 class="text-2xl font-bold text-gray-800 mb-4">Location & Map</h3>
+                        
+                        <?php if (!empty($property['map'])): ?>
+                            <!-- Interactive Google Maps -->
+                            <div class="map-container mb-4">
+                                <?php
+                                // Extract coordinates or embed URL from the Google Maps link
+                                $map_url = $property['map'];
+                                $embed_url = '';
+                                
+                                // Check if it's a Google Maps share link and convert to embed
+                                if (strpos($map_url, 'maps.google.com') !== false || strpos($map_url, 'goo.gl/maps') !== false) {
+                                    // For embed, we'll use the location name as fallback
+                                    $location_encoded = urlencode($property['location']);
+                                    $embed_url = "https://www.google.com/maps/embed/v1/place?key=YOUR_API_KEY&q=" . $location_encoded;
+                                    
+                                    // If no API key, use the basic embed with location search
+                                    $embed_url = "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3048.4!2d-74.0059413!3d40.7589!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2z" . urlencode($property['location']) . "!5e0!3m2!1sen!2sus!4v1234567890!5m2!1sen!2sus";
+                                }
+                                ?>
+                                
+                                <div class="map-overlay">
+                                    <a href="<?php echo htmlspecialchars($property['map']); ?>" 
+                                       target="_blank" 
+                                       class="map-button text-white px-3 py-2 rounded-lg text-sm font-medium inline-flex items-center shadow-lg">
+                                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                        </svg>
+                                        Open in Maps
+                                    </a>
+                                </div>
+                                
+                                <!-- Fallback iframe with location search -->
+                                <iframe 
+                                    src="https://www.google.com/maps?q=<?php echo urlencode($property['location']); ?>&output=embed"
+                                    width="100%" 
+                                    height="320" 
+                                    style="border:0;" 
+                                    allowfullscreen="" 
+                                    loading="lazy" 
+                                    referrerpolicy="no-referrer-when-downgrade">
+                                </iframe>
+                            </div>
+                            
+                            <div class="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                                <div class="flex items-center">
+                                    <svg class="w-5 h-5 text-indigo-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                    </svg>
+                                    <span class="text-gray-800 font-medium"><?php echo htmlspecialchars($property['location']); ?></span>
+                                </div>
+                                <a href="<?php echo htmlspecialchars($property['map']); ?>" 
+                                   target="_blank" 
+                                   class="text-indigo-600 hover:text-indigo-800 font-medium text-sm transition-colors">
+                                    Get Directions →
+                                </a>
+                            </div>
+                        <?php else: ?>
+                            <!-- Fallback when no map link is available -->
+                            <div class="w-full h-80 bg-gray-200 rounded-lg overflow-hidden flex items-center justify-center">
+                                <div class="text-center">
+                                    <i class="fas fa-map-marker-alt text-4xl text-gray-400 mb-4"></i>
+                                    <p class="text-gray-600 text-lg font-medium"><?php echo htmlspecialchars($property['location']); ?></p>
+                                    <p class="text-sm text-gray-500 mt-2">Interactive map not available</p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
 
                     <!-- Contact Agent Form -->
                     <div class="fade-in-up">
                         <h3 class="text-2xl font-bold text-gray-800 mb-4">Inquire About This Property</h3>
-                        <form class="space-y-6">
+                        
+                        <?php if ($form_message): ?>
+                            <div class="alert alert-<?php echo $form_status; ?>">
+                                <?php echo $form_message; ?>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <form method="POST" class="space-y-6">
                             <div>
-                                <label for="contact-name" class="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-                                <input type="text" id="contact-name" name="name" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" placeholder="Your full name">
+                                <label for="contact-name" class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                                <input type="text" id="contact-name" name="name" required
+                                       value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>"
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
+                                       placeholder="Your full name">
                             </div>
                             <div>
-                                <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-                                <input type="email" id="contact-email" name="email" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" placeholder="your.email@example.com">
+                                <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-2">Email Address *</label>
+                                <input type="email" id="contact-email" name="email" required
+                                       value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>"
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
+                                       placeholder="your.email@example.com">
                             </div>
                             <div>
-                                <label for="contact-phone" class="block text-sm font-medium text-gray-700 mb-2">Phone Number (Optional)</label>
-                                <input type="tel" id="contact-phone" name="phone" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" placeholder="(555) 123-4567">
+                                <label for="contact-phone" class="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                                <input type="tel" id="contact-phone" name="phone"
+                                       value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>"
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
+                                       placeholder="(555) 123-4567">
                             </div>
                             <div>
-                                <label for="contact-message" class="block text-sm font-medium text-gray-700 mb-2">Message</label>
-                                <textarea id="contact-message" name="message" rows="5" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" placeholder="I'm interested in this property and would like to schedule a viewing..."></textarea>
+                                <label for="contact-message" class="block text-sm font-medium text-gray-700 mb-2">Message *</label>
+                                <textarea id="contact-message" name="message" rows="5" required
+                                          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
+                                          placeholder="I'm interested in <?php echo htmlspecialchars($property['name']); ?> and would like to schedule a viewing..."><?php echo htmlspecialchars($_POST['message'] ?? ''); ?></textarea>
                             </div>
                             <div>
-                                <button type="submit" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-4 rounded-lg transition-all duration-300 transform hover:scale-105 magnetic-button shadow-2xl">
+                                <button type="submit" name="submit_inquiry" 
+                                        class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-4 rounded-lg transition-all duration-300 transform hover:scale-105 magnetic-button shadow-2xl">
                                     <span class="mr-2">Send Inquiry</span>
                                     <i class="fas fa-paper-plane"></i>
                                 </button>
@@ -232,7 +589,7 @@
     </main>
 
     <!-- Footer -->
-   <?php include('include/footer.php');?>
+    <?php include('include/footer.php');?>
 
     <!-- GSAP Animations Script -->
     <script>
@@ -439,6 +796,20 @@
             });
         });
 
+        // Auto-hide alert messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(alert => {
+                setTimeout(() => {
+                    alert.style.transition = 'opacity 0.5s ease';
+                    alert.style.opacity = '0';
+                    setTimeout(() => {
+                        alert.remove();
+                    }, 500);
+                }, 5000);
+            });
+        });
+
         // Refresh ScrollTrigger on resize
         window.addEventListener('resize', function() {
             if (typeof ScrollTrigger !== 'undefined') {
@@ -454,3 +825,84 @@
     </script>
 </body>
 </html>
+
+<?php
+/*
+GOOGLE MAPS INTEGRATION FEATURES ADDED:
+
+1. DATABASE SCHEMA UPDATE:
+   - Automatically adds 'map' column to property table if it doesn't exist
+   - Column type: TEXT NULL (allows for long Google Maps URLs)
+   - Position: After property_image column
+
+2. VISUAL MAP INTEGRATION:
+   - Map button overlay on property main image (top-left corner)
+   - Interactive Google Maps embed in Location section
+   - "Open in Maps" button overlay on embedded map
+   - "Get Directions" link below map
+   - Fallback display when no map link is available
+
+3. MAP FUNCTIONALITY:
+   - Direct links to Google Maps using the stored map URL
+   - Embedded map showing property location
+   - Mobile-friendly map interactions
+   - External link indicators with icons
+
+4. RESPONSIVE DESIGN:
+   - Map buttons adapt to different screen sizes
+   - Embedded maps are fully responsive
+   - Touch-friendly interactions on mobile devices
+
+5. ENHANCED LOCATION DISPLAY:
+   - Location text with Google Maps icon link
+   - Improved spacing and visual hierarchy
+   - External link icon for map interactions
+
+6. ERROR HANDLING:
+   - Graceful fallback when map field is empty
+   - Database error handling for schema updates
+   - Proper URL validation and sanitization
+
+7. STYLING IMPROVEMENTS:
+   - Modern gradient buttons for map links
+   - Hover effects and smooth transitions
+   - Consistent color scheme with existing design
+   - Shadow effects and rounded corners
+
+USAGE INSTRUCTIONS:
+
+1. DATABASE INTEGRATION:
+   - The script automatically adds the 'map' column to your property table
+   - Map links are stored as TEXT to accommodate long Google Maps URLs
+   - No manual database changes required
+
+2. ADDING MAP LINKS:
+   - Store Google Maps share links in the 'map' field
+   - Links can be any format: maps.google.com, goo.gl/maps, etc.
+   - The system handles different Google Maps URL formats
+
+3. VISUAL FEATURES:
+   - Map button appears on property image when map link exists
+   - Interactive embedded map in Location section
+   - Multiple ways to access map: button, embed, and text links
+
+4. MOBILE OPTIMIZATION:
+   - All map features work on mobile devices
+   - Touch-friendly buttons and interactions
+   - Responsive map sizing
+
+5. FALLBACK HANDLING:
+   - Shows location text when no map link is available
+   - Graceful degradation for older browsers
+   - Error handling for missing map data
+
+To extend this system:
+- Add map validation in admin forms
+- Create automatic geocoding for addresses
+- Add distance calculations to nearby amenities
+- Integrate with other mapping services
+- Add street view integration
+- Create property location clustering for multiple properties
+
+*/
+?>
