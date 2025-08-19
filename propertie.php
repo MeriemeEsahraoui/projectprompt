@@ -35,43 +35,31 @@ try {
     die("Error fetching property: " . $e->getMessage());
 }
 
-// Handle contact form submission
+// Handle contact form submission - Updated to match your inquire table schema
 $form_message = '';
 $form_status = '';
 
 if ($_POST && isset($_POST['submit_inquiry'])) {
-    $name = trim($_POST['name'] ?? '');
+    $fullname = trim($_POST['fullname'] ?? '');
     $email = trim($_POST['email'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
+    $phonenumber = trim($_POST['phonenumber'] ?? '');
     $message = trim($_POST['message'] ?? '');
     
     // Validation
     $errors = [];
-    if (empty($name)) $errors[] = "Name is required";
+    if (empty($fullname)) $errors[] = "Full name is required";
     if (empty($email)) $errors[] = "Email is required";
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Invalid email format";
     if (empty($message)) $errors[] = "Message is required";
     
     if (empty($errors)) {
         try {
-            // Create inquiries table if it doesn't exist
-            $pdo->exec("CREATE TABLE IF NOT EXISTS property_inquiries (
-                id INT PRIMARY KEY AUTO_INCREMENT,
-                property_id INT NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                email VARCHAR(255) NOT NULL,
-                phone VARCHAR(20),
-                message TEXT NOT NULL,
-                inquiry_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                status ENUM('new', 'contacted', 'closed') DEFAULT 'new'
-            )");
-            
-            // Insert inquiry into database
+            // Insert inquiry into the existing inquire table
             $stmt = $pdo->prepare("
-                INSERT INTO property_inquiries (property_id, name, email, phone, message) 
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO inquire (fullname, email, phonenumber, message, property_id, created_at) 
+                VALUES (?, ?, ?, ?, ?, NOW())
             ");
-            $stmt->execute([$property_id, $name, $email, $phone, $message]);
+            $stmt->execute([$fullname, $email, $phonenumber, $message, $property_id]);
             
             $form_message = "Thank you for your inquiry! We will get back to you soon.";
             $form_status = 'success';
@@ -82,6 +70,7 @@ if ($_POST && isset($_POST['submit_inquiry'])) {
         } catch(PDOException $e) {
             $form_message = "Sorry, there was an error sending your inquiry. Please try again.";
             $form_status = 'error';
+            error_log("Inquiry submission error: " . $e->getMessage());
         }
     } else {
         $form_message = implode('<br>', $errors);
@@ -408,59 +397,8 @@ include('include/head.php');
                         <div class="text-gray-700 leading-relaxed">
                             <?php 
                             $description = $property['description'];
-                            if (strlen($description) > 50) {
-                                echo '<p class="mb-4">' . nl2br(htmlspecialchars($description)) . '</p>';
-                            } else {
-                                // If description is too short, add some generic text
-                                echo '<p class="mb-4">' . nl2br(htmlspecialchars($description)) . '</p>';
-                                echo '<p class="text-gray-700 leading-relaxed">This beautiful ' . strtolower(formatPropertyType($property['type'])) . ' offers comfortable living in a desirable location. With ' . $property['number_of_bedrooms'] . ' bedrooms and ' . $property['number_of_bathrooms'] . ' bathrooms, it provides ample space for relaxation and entertainment. The property features modern amenities and is situated in the sought-after area of ' . htmlspecialchars($property['location']) . '.</p>';
-                            }
+                           echo '<p class="mb-4">' . nl2br(htmlspecialchars($description)) . '</p>';
                             ?>
-                            <p class="text-gray-700 leading-relaxed mt-4">
-                                This property represents excellent value at $<?php echo number_format($property['price']); ?> and is perfect for those seeking quality accommodation. Don't miss this opportunity to own a piece of prime real estate in <?php echo htmlspecialchars($property['location']); ?>.
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- Features & Amenities -->
-                    <div class="mb-8 slide-in-right">
-                        <h3 class="text-2xl font-bold text-gray-800 mb-4">Features & Amenities</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-gray-700">
-                            <?php 
-                            $feature_icons = [
-                                'Swimming Pool' => 'fas fa-swimming-pool',
-                                'Private Swimming Pool' => 'fas fa-swimming-pool',
-                                'Pool' => 'fas fa-swimming-pool',
-                                'Gym' => 'fas fa-dumbbell',
-                                'High-Speed Internet' => 'fas fa-wifi',
-                                'Internet' => 'fas fa-wifi',
-                                'Air Conditioning' => 'fas fa-fan',
-                                'Fireplace' => 'fas fa-fire-extinguisher',
-                                '24/7 Security' => 'fas fa-shield-alt',
-                                'Security' => 'fas fa-shield-alt',
-                                'Security System' => 'fas fa-shield-alt',
-                                'Kitchen' => 'fas fa-utensils',
-                                'Modern Kitchen' => 'fas fa-utensils',
-                                'Garden' => 'fas fa-tree',
-                                'Theater' => 'fas fa-video',
-                                'Parking' => 'fas fa-car',
-                                'Garage' => 'fas fa-car',
-                                'Balcony' => 'fas fa-building',
-                                'Elevator' => 'fas fa-arrows-alt-v',
-                                'Multiple Floors' => 'fas fa-layer-group',
-                                'Open Layout' => 'fas fa-expand-arrows-alt',
-                                'High Ceilings' => 'fas fa-arrows-alt-v',
-                                'Privacy' => 'fas fa-eye-slash'
-                            ];
-                            
-                            foreach ($features as $feature): 
-                                $icon = $feature_icons[$feature] ?? 'fas fa-check';
-                            ?>
-                                <div class="flex items-center space-x-3">
-                                    <i class="<?php echo $icon; ?> text-indigo-600"></i>
-                                    <span><?php echo htmlspecialchars($feature); ?></span>
-                                </div>
-                            <?php endforeach; ?>
                         </div>
                     </div>
 
@@ -471,24 +409,8 @@ include('include/head.php');
                         <?php if (!empty($property['map'])): ?>
                             <!-- Interactive Google Maps -->
                             <div class="map-container mb-4">
-                                <?php
-                                // Extract coordinates or embed URL from the Google Maps link
-                                $map_url = $property['map'];
-                                $embed_url = '';
-                                
-                                // Check if it's a Google Maps share link and convert to embed
-                                if (strpos($map_url, 'maps.google.com') !== false || strpos($map_url, 'goo.gl/maps') !== false) {
-                                    // For embed, we'll use the location name as fallback
-                                    $location_encoded = urlencode($property['location']);
-                                    $embed_url = "https://www.google.com/maps/embed/v1/place?key=YOUR_API_KEY&q=" . $location_encoded;
-                                    
-                                    // If no API key, use the basic embed with location search
-                                    $embed_url = "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3048.4!2d-74.0059413!3d40.7589!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2z" . urlencode($property['location']) . "!5e0!3m2!1sen!2sus!4v1234567890!5m2!1sen!2sus";
-                                }
-                                ?>
-                                
                                 <div class="map-overlay">
-                                    <a href="<?php echo htmlspecialchars($property['map']); ?>" 
+                                    <a href="<?php echo  ($property['map']); ?>" 
                                        target="_blank" 
                                        class="map-button text-white px-3 py-2 rounded-lg text-sm font-medium inline-flex items-center shadow-lg">
                                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -500,7 +422,7 @@ include('include/head.php');
                                 
                                 <!-- Fallback iframe with location search -->
                                 <iframe 
-                                    src="https://www.google.com/maps?q=<?php echo urlencode($property['location']); ?>&output=embed"
+                                    src="<?php echo ($property['map']); ?>"
                                     width="100%" 
                                     height="320" 
                                     style="border:0;" 
@@ -536,7 +458,7 @@ include('include/head.php');
                         <?php endif; ?>
                     </div>
 
-                    <!-- Contact Agent Form -->
+                    <!-- Contact Agent Form - Updated to match inquire table schema -->
                     <div class="fade-in-up">
                         <h3 class="text-2xl font-bold text-gray-800 mb-4">Inquire About This Property</h3>
                         
@@ -548,9 +470,9 @@ include('include/head.php');
                         
                         <form method="POST" class="space-y-6">
                             <div>
-                                <label for="contact-name" class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                                <input type="text" id="contact-name" name="name" required
-                                       value="<?php echo htmlspecialchars($_POST['name'] ?? ''); ?>"
+                                <label for="contact-fullname" class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                                <input type="text" id="contact-fullname" name="fullname" required
+                                       value="<?php echo htmlspecialchars($_POST['fullname'] ?? ''); ?>"
                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
                                        placeholder="Your full name">
                             </div>
@@ -562,9 +484,9 @@ include('include/head.php');
                                        placeholder="your.email@example.com">
                             </div>
                             <div>
-                                <label for="contact-phone" class="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
-                                <input type="tel" id="contact-phone" name="phone"
-                                       value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>"
+                                <label for="contact-phonenumber" class="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
+                                <input type="tel" id="contact-phonenumber" name="phonenumber"
+                                       value="<?php echo htmlspecialchars($_POST['phonenumber'] ?? ''); ?>"
                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-300 transform focus:scale-105" 
                                        placeholder="(555) 123-4567">
                             </div>
