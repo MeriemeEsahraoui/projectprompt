@@ -134,18 +134,24 @@ try {
     $stmt->execute([$user_id]);
     $stats = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    $stmt = $pdo->prepare("SELECT COUNT(*) as available_properties FROM property WHERE created_by = ? AND status = 'available'");
+    $stmt = $pdo->prepare("SELECT COUNT(*) as available_properties FROM property WHERE created_by = ? AND status = 0");
     $stmt->execute([$user_id]);
     $available_stats = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    $stmt = $pdo->prepare("SELECT COUNT(*) as rented_properties FROM property WHERE created_by = ? AND status = 'rented'");
+    $stmt = $pdo->prepare("SELECT COUNT(*) as rented_properties FROM property WHERE created_by = ? AND status = 1");
     $stmt->execute([$user_id]);
     $rented_stats = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // Get inquiries count
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total_inquiries FROM inquire i INNER JOIN property p ON i.property_id = p.Id WHERE p.created_by = ?");
+    $stmt->execute([$user_id]);
+    $inquiry_stats = $stmt->fetch(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     error_log("Get stats error: " . $e->getMessage());
     $stats = ['total_properties' => 0];
     $available_stats = ['available_properties' => 0];
     $rented_stats = ['rented_properties' => 0];
+    $inquiry_stats = ['total_inquiries' => 0];
 }
 ?>
 <!DOCTYPE html>
@@ -241,6 +247,10 @@ try {
                         <div class="flex justify-between items-center">
                             <span class="text-sm text-gray-600 dark:text-gray-400">Rented</span>
                             <span class="text-lg font-semibold text-blue-600"><?php echo $rented_stats['rented_properties']; ?></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Total Inquiries</span>
+                            <span class="text-lg font-semibold text-purple-600"><?php echo $inquiry_stats['total_inquiries']; ?></span>
                         </div>
                     </div>
                 </div>
@@ -421,6 +431,92 @@ try {
                     </form>
                 </div>
 
+                <!-- Data Export -->
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                    <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Data Export</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Download your property data and inquiries in various formats.</p>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Properties Export -->
+                            <div class="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-700">
+                                <div class="flex items-center mb-3">
+                                    <svg class="w-6 h-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                                    </svg>
+                                    <h4 class="font-semibold text-gray-900 dark:text-white">Properties</h4>
+                                </div>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4"><?php echo $stats['total_properties']; ?> properties in your portfolio</p>
+                                <div class="flex space-x-2">
+                                    <button onclick="exportData('properties', 'csv')" class="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+                                        CSV
+                                    </button>
+                                    <button onclick="exportData('properties', 'json')" class="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors">
+                                        JSON
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Inquiries Export -->
+                            <div class="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-700">
+                                <div class="flex items-center mb-3">
+                                    <svg class="w-6 h-6 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                                    </svg>
+                                    <h4 class="font-semibold text-gray-900 dark:text-white">Inquiries</h4>
+                                </div>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4"><?php echo $inquiry_stats['total_inquiries']; ?> inquiries received</p>
+                                <div class="flex space-x-2">
+                                    <button onclick="exportData('inquiries', 'csv')" class="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors">
+                                        CSV
+                                    </button>
+                                    <button onclick="exportData('inquiries', 'json')" class="flex-1 px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors">
+                                        JSON
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Complete Export -->
+                            <div class="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-lg p-4 border border-green-200 dark:border-green-700">
+                                <div class="flex items-center mb-3">
+                                    <svg class="w-6 h-6 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                    </svg>
+                                    <h4 class="font-semibold text-gray-900 dark:text-white">Complete Data</h4>
+                                </div>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">All properties and inquiries</p>
+                                <div class="flex space-x-2">
+                                    <button onclick="exportData('all', 'csv')" class="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+                                        CSV
+                                    </button>
+                                    <button onclick="exportData('all', 'json')" class="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors">
+                                        JSON
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Export Information -->
+                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 mt-6">
+                            <div class="flex items-start">
+                                <svg class="w-5 h-5 text-gray-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                    <p class="font-medium mb-1">Export Information:</p>
+                                    <ul class="list-disc list-inside space-y-1">
+                                        <li><strong>CSV:</strong> Perfect for Excel or spreadsheet applications</li>
+                                        <li><strong>JSON:</strong> Structured data format for developers or backup purposes</li>
+                                        <li><strong>Properties:</strong> Includes all property details, status, and creation dates</li>
+                                        <li><strong>Inquiries:</strong> Contains customer inquiries with property references</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Account Actions -->
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
                     <div class="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -428,20 +524,6 @@ try {
                         <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Quick actions for your account management.</p>
                     </div>
                     <div class="p-6 space-y-4">
-                        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <div>
-                                <h4 class="text-sm font-medium text-gray-900 dark:text-white">Export Data</h4>
-                                <p class="text-sm text-gray-600 dark:text-gray-400">Download a copy of your property data</p>
-                            </div>
-                            <button 
-                                type="button" 
-                                onclick="exportData()"
-                                class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
-                            >
-                                Export
-                            </button>
-                        </div>
-                        
                         <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                             <div>
                                 <h4 class="text-sm font-medium text-gray-900 dark:text-white">Session Management</h4>
@@ -460,6 +542,17 @@ try {
         </div>
     </main>
 
+    <!-- Export Loading Modal -->
+    <div id="exportModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-sm w-full mx-4">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Preparing Export</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400">Your data is being prepared for download...</p>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Password confirmation validation
         const newPassword = document.getElementById('new_password');
@@ -476,9 +569,73 @@ try {
         newPassword.addEventListener('input', validatePassword);
         confirmPassword.addEventListener('input', validatePassword);
 
-        // Export data function (placeholder)
-        function exportData() {
-            alert('Export functionality would be implemented here. This would generate a CSV or JSON file with the user\'s property data.');
+        // Export data function
+        function exportData(type, format) {
+            // Show loading modal
+            document.getElementById('exportModal').classList.remove('hidden');
+            
+            // Create a temporary link to trigger download
+            const link = document.createElement('a');
+            link.href = `export.php?type=${type}&format=${format}`;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            
+            // Trigger download
+            link.click();
+            
+            // Clean up
+            document.body.removeChild(link);
+            
+            // Hide loading modal after a delay
+            setTimeout(() => {
+                document.getElementById('exportModal').classList.add('hidden');
+                
+                // Show success message
+                showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} data exported successfully as ${format.toUpperCase()}!`, 'success');
+            }, 2000);
+        }
+
+        // Show notification function
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 
+                           type === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 
+                           'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+            const textColor = type === 'success' ? 'text-green-800 dark:text-green-200' : 
+                            type === 'error' ? 'text-red-800 dark:text-red-200' : 
+                            'text-blue-800 dark:text-blue-200';
+            const iconColor = type === 'success' ? 'text-green-500' : 
+                            type === 'error' ? 'text-red-500' : 
+                            'text-blue-500';
+            
+            notification.className = `fixed top-4 right-4 p-4 ${bgColor} rounded-lg border z-50 max-w-sm shadow-lg`;
+            notification.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="w-5 h-5 ${iconColor} mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        ${type === 'success' ? 
+                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>' :
+                        type === 'error' ? 
+                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>' :
+                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>'
+                        }
+                    </svg>
+                    <p class="text-sm ${textColor}">${message}</p>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-auto ${textColor} hover:opacity-70">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, 5000);
         }
 
         // Auto-hide success/error messages after 5 seconds
@@ -490,6 +647,13 @@ try {
                 setTimeout(() => message.remove(), 500);
             });
         }, 5000);
+
+        // Close modal when clicking outside
+        document.getElementById('exportModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.classList.add('hidden');
+            }
+        });
     </script>
 </body>
 </html>
