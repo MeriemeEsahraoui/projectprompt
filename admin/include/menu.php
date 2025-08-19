@@ -22,7 +22,12 @@ if ($user_name) {
 // Get current page for active menu highlighting
 $current_page = basename($_SERVER['PHP_SELF']);
 ?>
-
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100..900;1,100..900&display=swap');
+        body {
+              font-family: "Raleway", sans-serif;
+        }
+    </style>
 <nav class="bg-white dark:bg-gray-800 shadow-lg border-b border-gray-200 dark:border-gray-700">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">   
         <div class="flex justify-between items-center h-16">
